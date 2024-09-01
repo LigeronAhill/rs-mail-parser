@@ -71,16 +71,11 @@ impl MailClient {
                         .and_then(|a| a.first().and_then(|s| s.address()))
                         .map(|s| s.to_lowercase())
                         .unwrap_or_default();
-                    let subject = parsed
-                        .subject()
-                        .map(|s| s.to_lowercase())
-                        .unwrap_or_default();
                     if SUPPLIERS.contains(&sender.as_str()) {
                         let attachments = parsed
                             .attachments()
                             .map(|a| a.contents().to_vec())
                             .collect::<Vec<_>>();
-                        let attachments_count = attachments.len();
                         m.insert(sender, attachments);
                     }
                 }
