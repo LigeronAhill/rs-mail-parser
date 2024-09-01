@@ -1390,6 +1390,7 @@ dependencies = [
  "calamine",
  "config",
  "futures",
+ "log",
  "mail-parser",
  "reqwest",
  "secrecy",

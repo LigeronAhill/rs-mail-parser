@@ -1,7 +1,9 @@
 use anyhow::Result;
 use futures::TryStreamExt;
+use mail_parser::MimeHeaders;
 use std::collections::HashMap;
 use tokio::net::TcpStream;
+use tracing::info;
 
 const QUERY: &str = "(UID RFC822)";
 const INBOX: &str = "INBOX";
@@ -16,6 +18,7 @@ const SUPPLIERS: [&str; 6] = [
 pub async fn new(user: &str, pass: &str, host: &str) -> Result<MailClient> {
     let imap_addr = (host, 993);
     let tcp_stream = TcpStream::connect(imap_addr).await?;
+    info!("Delay mode: {:?}", tcp_stream.nodelay()?);
     let tls = async_native_tls::TlsConnector::new().danger_accept_invalid_certs(true);
     let tls_stream = tls.connect(host, tcp_stream).await?;
     let client = async_imap::Client::new(tls_stream);
@@ -43,7 +46,9 @@ impl MailClient {
     async fn session(&self) -> Result<async_imap::Session<async_native_tls::TlsStream<TcpStream>>> {
         let imap_addr = (self.host.clone(), self.port);
         let tcp_stream = TcpStream::connect(imap_addr).await?;
-        let tls = async_native_tls::TlsConnector::new().danger_accept_invalid_certs(true);
+        let tls = async_native_tls::TlsConnector::new()
+            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_hostnames(true);
         let tls_stream = tls.connect(&self.host, tcp_stream).await?;
         let client = async_imap::Client::new(tls_stream);
         let mut session = client
@@ -74,7 +79,16 @@ impl MailClient {
                     if SUPPLIERS.contains(&sender.as_str()) {
                         let attachments = parsed
                             .attachments()
-                            .map(|a| a.contents().to_vec())
+                            .flat_map(|a| {
+                                if a.attachment_name().is_some_and(|n| {
+                                    n.to_lowercase().contains(".xls")
+                                        || n.to_lowercase().contains(".xlsx")
+                                }) {
+                                    Some(a.contents().to_vec())
+                                } else {
+                                    None
+                                }
+                            })
                             .collect::<Vec<_>>();
                         m.insert(sender, attachments);
                     }
