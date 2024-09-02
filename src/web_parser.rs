@@ -6,7 +6,7 @@ use tracing::info;
 pub struct WebParser {
     username: String,
     password: String,
-    client: reqwest::Client,
+    client: reqwest::blocking::Client,
 }
 pub fn new(user: &str, pass: &str) -> Result<WebParser> {
     let username = user.to_string();
@@ -17,7 +17,7 @@ pub fn new(user: &str, pass: &str) -> Result<WebParser> {
         "https://www.yandex.ru/clck/jsredir?from=yandex.ru;suggest;browser&text=",
     )?;
     def_head.insert(reqwest::header::REFERER, v);
-    let client = reqwest::Client::builder()
+    let client = reqwest::blocking::Client::builder()
         .gzip(true)
         .default_headers(def_head)
         .cookie_store(true)
@@ -37,7 +37,7 @@ impl WebParser {
     fn pass(&self) -> &str {
         &self.password
     }
-    pub async fn ortgraph(&self) -> Result<Vec<Vec<u8>>> {
+    pub fn ortgraph(&self) -> Result<Vec<Vec<u8>>> {
         const BASE_URI: &str = "https://ortgraph.ru";
         const STOCK: &str = "remains/";
         const AUTH: &str = "auth/";
@@ -57,10 +57,9 @@ impl WebParser {
             .post(&auth_uri)
             .query(&[("login", "yes")])
             .form(&form)
-            .send()
-            .await?;
+            .send()?;
         if response.status() != reqwest::StatusCode::OK {
-            let b = response.text().await?;
+            let b = response.text()?;
             info!("Something with auth!!!!!!!!!!!");
             info!("{b:#?}");
         }
@@ -71,21 +70,20 @@ impl WebParser {
             .client
             .get(&stock_uri)
             .query(&[("login", "yes")])
-            .send()
-            .await?;
-        let body = response.text().await?;
+            .send()?;
+        let body = response.text()?;
         let links = get_links(body);
         let mut files = Vec::new();
         for path in links {
             let mut uri = BASE_URI.to_string();
             uri.push_str(&path);
-            let temp_res = self.client.get(&uri).send().await?;
-            let bytes = temp_res.bytes().await?.as_ref().to_vec();
+            let temp_res = self.client.get(&uri).send()?;
+            let bytes = temp_res.bytes()?.as_ref().to_vec();
             files.push(bytes.to_owned());
         }
         Ok(files)
     }
-    pub async fn vvk(&self) -> Result<Vec<Vec<u8>>> {
+    pub fn vvk(&self) -> Result<Vec<Vec<u8>>> {
         const BASE_URI: &str = "https://disk.yandex.ru/d/1qA555p_DbQiaQ";
         let uri = "https://cloud-api.yandex.net:443/v1/disk/public/resources";
         // let download_uri = "https://cloud-api.yandex.net:443/v1/disk/public/resources/download";
@@ -93,12 +91,11 @@ impl WebParser {
         let response = self.client
             .get(uri)
             .query(&[("public_key", BASE_URI)])
-            .send()
-            .await?;
-        let root: Root = response.json().await?;
+            .send()?;
+        let root: Root = response.json()?;
         for i in root.embedded.items {
             // info!("Got vvk link: {}", i.file);
-            let file = self.client.get(i.file).send().await?.bytes().await?.to_vec();
+            let file = self.client.get(i.file).send()?.bytes()?.to_vec();
             result.push(file)
         }
         Ok(result)

@@ -1,11 +1,10 @@
-use anyhow::Result;
-use futures::TryStreamExt;
+use anyhow::{anyhow, Result};
 use mail_parser::MimeHeaders;
 use std::collections::HashMap;
-use tokio::net::TcpStream;
-use tracing::info;
+use std::net::{SocketAddr, ToSocketAddrs};
+use std::ops::Deref;
 
-const QUERY: &str = "(UID RFC822)";
+const QUERY: &str = "RFC822";
 const INBOX: &str = "INBOX";
 const SUPPLIERS: [&str; 6] = [
     "vvolodin@opuscontract.ru",
@@ -15,60 +14,50 @@ const SUPPLIERS: [&str; 6] = [
     "dealer@kover-zefir.ru",
     "almaz2008@yandex.ru",
 ];
-pub async fn new(user: &str, pass: &str, host: &str) -> Result<MailClient> {
-    let imap_addr = (host, 993);
-    let tcp_stream = TcpStream::connect(imap_addr).await?;
-    info!("Delay mode: {:?}", tcp_stream.nodelay()?);
-    let tls = async_native_tls::TlsConnector::new().danger_accept_invalid_certs(true);
-    let tls_stream = tls.connect(host, tcp_stream).await?;
-    let client = async_imap::Client::new(tls_stream);
-    let mut session = client.login(user, pass).await.map_err(|e| e.0)?;
-    session.select(INBOX).await?;
-    let msg_count = session.search("ALL").await?.len();
-    let offset = msg_count - 100;
-    session.logout().await?;
-    Ok(MailClient {
+pub fn new(user: &str, pass: &str, host: &str) -> Result<MailClient> {
+    let socket_addr = format!("{host}:993")
+        .to_socket_addrs()?
+        .next()
+        .ok_or(anyhow!("Wrong host or port"))?;
+    let mut mail_client = MailClient {
         user: user.to_string(),
         pass: pass.to_string(),
         host: host.to_string(),
-        port: 993,
-        offset,
-    })
+        socket: socket_addr,
+        from: 0,
+    };
+    let mut session = mail_client.session()?;
+    session.select(INBOX)?;
+    let msg_count = session.search("ALL")?.len();
+    mail_client.from = msg_count - 300;
+    session.logout()?;
+    Ok(mail_client)
 }
 pub struct MailClient {
     user: String,
     pass: String,
     host: String,
-    port: u16,
-    offset: usize,
+    socket: SocketAddr,
+    from: usize,
 }
 impl MailClient {
-    async fn session(&self) -> Result<async_imap::Session<async_native_tls::TlsStream<TcpStream>>> {
-        let imap_addr = (self.host.clone(), self.port);
-        let tcp_stream = TcpStream::connect(imap_addr).await?;
-        let tls = async_native_tls::TlsConnector::new()
+    fn session(&self) -> Result<imap::Session<native_tls::TlsStream<std::net::TcpStream>>> {
+        let tls = native_tls::TlsConnector::builder()
             .danger_accept_invalid_certs(true)
-            .danger_accept_invalid_hostnames(true);
-        let tls_stream = tls.connect(&self.host, tcp_stream).await?;
-        let client = async_imap::Client::new(tls_stream);
-        let mut session = client
-            .login(&self.user, &self.pass)
-            .await
-            .map_err(|e| e.0)?;
-        session.select(INBOX).await?;
+            .build()?;
+        let client = imap::connect(self.socket, &self.host, &tls)?;
+        let mut session = client.login(&self.user, &self.pass).map_err(|e| e.0)?;
+        session.select(INBOX)?;
         Ok(session)
     }
-    pub async fn fetch(&self) -> Result<HashMap<String, Vec<Vec<u8>>>> {
-        let mut session = self.session().await?;
-        let msg_count = session.search("ALL").await?.len();
-        let q = format!("{}:{msg_count}", self.offset);
-        let fetches = session
-            .fetch(q, QUERY)
-            .await?
-            .try_collect::<Vec<_>>()
-            .await?;
+    pub fn fetch(&mut self) -> Result<HashMap<String, Vec<Vec<u8>>>> {
+        let mut session = self.session()?;
+        let msg_count = session.search("ALL")?.len();
+        let q = format!("{}:{msg_count}", self.from);
+        let fetches = session.fetch(q, QUERY)?;
+        self.from = msg_count;
         let mut m = HashMap::new();
-        for fetch in fetches {
+        for fetch in fetches.deref() {
             if let Some(body) = fetch.body() {
                 if let Some(parsed) = mail_parser::MessageParser::default().parse(body) {
                     let sender = parsed
@@ -81,21 +70,25 @@ impl MailClient {
                             .attachments()
                             .flat_map(|a| {
                                 if a.attachment_name().is_some_and(|n| {
-                                    n.to_lowercase().contains(".xls")
-                                        || n.to_lowercase().contains(".xlsx")
-                                }) {
+                                    n.to_lowercase().contains("склад")
+                                        || n.to_lowercase().contains("остат")
+                                }) || (sender == "vvolodin@opuscontract.ru"
+                                    && a.attachment_name().is_none())
+                                {
                                     Some(a.contents().to_vec())
                                 } else {
                                     None
                                 }
                             })
                             .collect::<Vec<_>>();
-                        m.insert(sender, attachments);
+                        if !attachments.is_empty() {
+                            m.insert(sender, attachments);
+                        }
                     }
                 }
             }
         }
-        session.logout().await?;
+        session.logout()?;
         Ok(m)
     }
 }
