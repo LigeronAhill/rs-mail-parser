@@ -18,7 +18,7 @@ pub fn parser(files: Vec<Vec<u8>>) -> ParseResult {
                     for sheet in sheets {
                         if let Ok(table) = wb.worksheet_range(&sheet) {
                             let tx = tx.clone();
-                            thread::spawn(move || { parse(table, tx) });
+                            thread::spawn(move || parse(table, tx));
                         }
                     }
                 }
@@ -30,10 +30,7 @@ pub fn parser(files: Vec<Vec<u8>>) -> ParseResult {
         }
     });
     let items = rx.iter().collect();
-    ParseResult {
-        supplier,
-        items,
-    }
+    ParseResult { supplier, items }
 }
 
 fn parse(table: Range<Data>, tx: Sender<StockItem>) {
@@ -41,7 +38,10 @@ fn parse(table: Range<Data>, tx: Sender<StockItem>) {
     let mut pt = String::new();
     for row in table.rows() {
         if let Some(stock) = row.get(5).and_then(|data| data.get_float()) {
-            if let Some(raw_name) = row.first().and_then(|data| data.get_string().map(|w| w.to_string())) {
+            if let Some(raw_name) = row
+                .first()
+                .and_then(|data| data.get_string().map(|w| w.to_string()))
+            {
                 if PRODUCT_TYPES.contains(&raw_name.as_str()) {
                     pt = raw_name;
                     continue;
@@ -49,11 +49,8 @@ fn parse(table: Range<Data>, tx: Sender<StockItem>) {
                     brand = raw_name;
                     continue;
                 } else if stock > 5.0 {
-                    let name = format!("{pt} {brand} {raw_name}").split_whitespace().map(|w| w.trim().to_string()).collect();
-                    let item = StockItem {
-                        name,
-                        stock,
-                    };
+                    let name = format!("{pt} {brand} {raw_name}");
+                    let item = StockItem { name, stock };
                     if tx.send(item).is_err() {
                         error!("Error sending item...")
                     }

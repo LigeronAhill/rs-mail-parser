@@ -6,10 +6,11 @@ use std::ops::Deref;
 
 const QUERY: &str = "RFC822";
 const INBOX: &str = "INBOX";
-const SUPPLIERS: [&str; 6] = [
+const SUPPLIERS: [&str; 7] = [
     "vvolodin@opuscontract.ru",
     "sales@bratec-lis.com",
     "rassilka@fancyfloor.ru",
+    "sale8@fancy-floor.ru",
     "ulyana.boyko@carpetland.ru",
     "dealer@kover-zefir.ru",
     "almaz2008@yandex.ru",
@@ -33,6 +34,7 @@ pub fn new(user: &str, pass: &str, host: &str) -> Result<MailClient> {
     session.logout()?;
     Ok(mail_client)
 }
+#[derive(Clone)]
 pub struct MailClient {
     user: String,
     pass: String,

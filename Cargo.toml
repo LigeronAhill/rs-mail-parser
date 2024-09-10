@@ -11,7 +11,7 @@ imap = "2.4.1"
 native-tls = "0.2.12"
 mail-parser = "0.9.3"
 # async
-#tokio = {version = "1.40.0", features = ["full"]}
+tokio = { version = "1.40.0", features = ["rt"] }
 #futures = "0.3.30"
 rayon = "1.10.0"
 # serde
@@ -31,3 +31,7 @@ tl = "0.7.8"
 reqwest = { version = "0.12.7", features = ["json", "gzip", "cookies", "blocking"] }
 # secrets
 secrecy = { version = "0.9.0-pre.0", features = ["serde"] }
+# db
+surrealdb = "1.5.4"
+chrono = { version = "0.4.38", features = ["serde"] }
+regex = "1.10.6"

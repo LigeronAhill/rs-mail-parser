@@ -1,13 +1,14 @@
 pub mod opus;
+pub mod fancy;
 
 #[derive(Debug)]
 pub struct StockItem {
-    name: String,
-    stock: f64,
+    pub name: String,
+    pub stock: f64,
 }
 
 #[derive(Debug)]
 pub struct ParseResult {
-    supplier: String,
-    items: Vec<StockItem>,
+    pub supplier: String,
+    pub items: Vec<StockItem>,
 }
