@@ -45,12 +45,14 @@ fn parse(table: Range<Data>, tx: Sender<StockItem>) {
             .and_then(|d| d.to_string().trim().parse::<f64>().ok())
         {
             let name = row.get(2).map(|d| d.to_string()).unwrap_or_default();
-            let item = StockItem {
-                name: name.clone(),
-                stock,
-            };
-            if tx.send(item).is_err() {
-                error!("Error sending item...")
+            if !name.is_empty() {
+                let item = StockItem {
+                    name: name.clone(),
+                    stock,
+                };
+                if tx.send(item).is_err() {
+                    error!("Error sending item...")
+                }
             }
         }
     }

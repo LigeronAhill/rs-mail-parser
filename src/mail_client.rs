@@ -1,24 +1,16 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use mail_parser::MimeHeaders;
 use std::collections::HashMap;
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::ops::Deref;
-use std::str::FromStr;
 use surrealdb::sql::Datetime;
 use tracing::info;
 
 const QUERY: &str = "RFC822";
 const INBOX: &str = "INBOX";
 pub fn new(user: &str, pass: &str, host: &str) -> Result<MailClient> {
-    let socket_addr = format!("{host}:993")
-        .to_socket_addrs()?
-        .next()
-        .ok_or(anyhow!("Wrong host or port"))?;
     let mut mail_client = MailClient {
         user: user.to_string(),
         pass: pass.to_string(),
         host: host.to_string(),
-        socket: socket_addr,
         from: 0,
     };
     let mut session = mail_client.session()?;
@@ -33,15 +25,14 @@ pub struct MailClient {
     user: String,
     pass: String,
     host: String,
-    socket: SocketAddr,
+    // socket: SocketAddr,
     from: usize,
 }
 impl MailClient {
-    fn session(&self) -> Result<imap::Session<native_tls::TlsStream<std::net::TcpStream>>> {
-        let tls = native_tls::TlsConnector::builder()
-            .danger_accept_invalid_certs(true)
-            .build()?;
-        let client = imap::connect(self.socket, &self.host, &tls)?;
+    fn session(&self) -> Result<imap::Session<Box<dyn imap::ImapConnection>>> {
+        let client = imap::ClientBuilder::new(&self.host, 993)
+            .danger_skip_tls_verify(true)
+            .connect()?;
         let mut session = client.login(&self.user, &self.pass).map_err(|e| e.0)?;
         session.select(INBOX)?;
         Ok(session)
@@ -58,11 +49,11 @@ impl MailClient {
         let mut session = self.session()?;
         let msg_count = session.search("ALL")?.len();
         let q = format!("{}:{msg_count}", self.from);
-        info!("Fetching from {q} to {msg_count}");
+        info!("Fetching from {} to {msg_count}", self.from);
         let fetches = session.fetch(q, QUERY)?;
         self.from = msg_count;
         let mut m = HashMap::new();
-        for fetch in fetches.deref() {
+        for fetch in fetches.iter() {
             if let Some(body) = fetch.body() {
                 if let Some(parsed) = mail_parser::MessageParser::default().parse(body) {
                     let sender = parsed
@@ -87,10 +78,9 @@ impl MailClient {
                             })
                             .collect::<Vec<_>>();
                         if !attachments.is_empty() {
-                            let received = if let Some(r) = parsed
-                                .date()
-                                .and_then(|d| Datetime::from_str(&d.to_rfc3339()).ok())
-                            {
+                            let received = if let Some(r) = parsed.date().and_then(|d| {
+                                <Datetime as std::str::FromStr>::from_str(&d.to_rfc3339()).ok()
+                            }) {
                                 r
                             } else {
                                 Datetime(chrono::Utc::now())
