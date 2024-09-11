@@ -5,7 +5,8 @@ use surrealdb::engine::remote::ws::{Client, Ws};
 use surrealdb::opt::auth::Root;
 use surrealdb::sql::{Datetime, Id, Thing};
 use surrealdb::Surreal;
-
+const NAMESPACE: &str = "safira";
+const DBNAME: &str = "assortment";
 pub struct Storage {
     db: Surreal<Client>,
 }
@@ -62,8 +63,8 @@ impl DbStockItem {
             .collect()
     }
 }
-pub async fn new(user: &str, pass: &str, ns: &str, db_name: &str) -> Result<Storage> {
-    let db = Surreal::new::<Ws>("127.0.0.1:8000").await?;
+pub async fn new(user: &str, pass: &str, addr: &str) -> Result<Storage> {
+    let db = Surreal::new::<Ws>(addr).await?;
 
     db.signin(Root {
         username: user,
@@ -71,6 +72,6 @@ pub async fn new(user: &str, pass: &str, ns: &str, db_name: &str) -> Result<Stor
     })
     .await?;
 
-    db.use_ns(ns).use_db(db_name).await?;
+    db.use_ns(NAMESPACE).use_db(DBNAME).await?;
     Ok(Storage { db })
 }

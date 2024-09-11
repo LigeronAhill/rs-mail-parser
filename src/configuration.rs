@@ -7,6 +7,7 @@ use tracing::instrument;
 pub struct Configuration {
     ortgraph: Ortgraph,
     mail: Mail,
+    db: Db,
 }
 #[derive(Debug, Deserialize)]
 pub struct Ortgraph {
@@ -18,6 +19,12 @@ pub struct Mail {
     host: SecretBox<String>,
     user: SecretBox<String>,
     pass: SecretBox<String>,
+}
+#[derive(Debug, Deserialize)]
+pub struct Db {
+    user: SecretBox<String>,
+    pass: SecretBox<String>,
+    addr: SecretBox<String>,
 }
 #[instrument]
 pub fn get() -> Result<Configuration> {
@@ -43,5 +50,14 @@ impl Configuration {
     }
     pub fn mail_pass(&self) -> &str {
         &self.mail.pass.expose_secret()
+    }
+    pub fn db_user(&self) -> &str {
+        &self.db.user.expose_secret()
+    }
+    pub fn db_pass(&self) -> &str {
+        &self.db.pass.expose_secret()
+    }
+    pub fn db_addr(&self) -> &str {
+        &self.db.addr.expose_secret()
     }
 }

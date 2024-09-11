@@ -57,10 +57,9 @@ fn main() -> Result<()> {
         std::thread::sleep(std::time::Duration::from_secs(60 * 60 * 24));
     });
     // db
-    // TODO: add credentials
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        match storage::new("root", "root", "test", "test").await {
+        match storage::new(cfg.db_user(), cfg.db_pass(), cfg.db_addr()).await {
             Ok(db) => {
                 info!("DB client initialized successfully");
                 loop {
