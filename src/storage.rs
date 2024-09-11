@@ -12,7 +12,7 @@ pub struct Storage {
 impl Storage {
     async fn clear(&self, supplier: &str) -> Result<()> {
         let sql = "
-            DELETE stock WHERE supplier = $supplier;
+            DELETE raw_stock WHERE supplier = $supplier RETURN BEFORE;
         ";
         let mut result = self.db.query(sql).bind(("supplier", supplier)).await?;
         let deleted: Vec<DbStockItem> = result.take(0)?;
@@ -23,8 +23,11 @@ impl Storage {
         let supplier = pr.supplier.clone();
         self.clear(&supplier).await?;
         let obj = DbStockItem::from_parse_result(pr);
-        let created: Vec<DbStockItem> = self.db.insert("stock").content(obj).await?;
-        tracing::info!("Created {} new records of supplier {supplier}", created.len());
+        let created: Vec<DbStockItem> = self.db.insert("raw_stock").content(obj).await?;
+        tracing::info!(
+            "Created {} new records of supplier {supplier}",
+            created.len()
+        );
         Ok(())
     }
 }
@@ -37,12 +40,11 @@ struct DbStockItem {
     updated: Datetime,
 }
 impl DbStockItem {
-    fn new(supplier: String, name: String, stock: f64) -> Self {
+    fn new(supplier: String, name: String, stock: f64, updated: Datetime) -> Self {
         let id = Thing {
-            tb: "stock".to_string(),
-            id: Id::uuid(),
+            tb: "raw_stock".to_string(),
+            id: Id::rand(),
         };
-        let updated = Datetime(chrono::Utc::now());
         Self {
             id,
             supplier,
@@ -54,9 +56,10 @@ impl DbStockItem {
     fn from_parse_result(pr: ParseResult) -> Vec<DbStockItem> {
         use rayon::prelude::*;
         let supplier = pr.supplier;
-        pr.items.par_iter().map(|i| {
-            DbStockItem::new(supplier.clone(), i.name.clone(), i.stock)
-        }).collect()
+        pr.items
+            .par_iter()
+            .map(|i| DbStockItem::new(supplier.clone(), i.name.clone(), i.stock, pr.date.clone()))
+            .collect()
     }
 }
 pub async fn new(user: &str, pass: &str, ns: &str, db_name: &str) -> Result<Storage> {
@@ -66,7 +69,7 @@ pub async fn new(user: &str, pass: &str, ns: &str, db_name: &str) -> Result<Stor
         username: user,
         password: pass,
     })
-        .await?;
+    .await?;
 
     db.use_ns(ns).use_db(db_name).await?;
     Ok(Storage { db })

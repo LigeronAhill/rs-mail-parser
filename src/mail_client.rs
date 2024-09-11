@@ -3,18 +3,12 @@ use mail_parser::MimeHeaders;
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::ops::Deref;
+use std::str::FromStr;
+use surrealdb::sql::Datetime;
+use tracing::info;
 
 const QUERY: &str = "RFC822";
 const INBOX: &str = "INBOX";
-const SUPPLIERS: [&str; 7] = [
-    "vvolodin@opuscontract.ru",
-    "sales@bratec-lis.com",
-    "rassilka@fancyfloor.ru",
-    "sale8@fancy-floor.ru",
-    "ulyana.boyko@carpetland.ru",
-    "dealer@kover-zefir.ru",
-    "almaz2008@yandex.ru",
-];
 pub fn new(user: &str, pass: &str, host: &str) -> Result<MailClient> {
     let socket_addr = format!("{host}:993")
         .to_socket_addrs()?
@@ -52,10 +46,19 @@ impl MailClient {
         session.select(INBOX)?;
         Ok(session)
     }
-    pub fn fetch(&mut self) -> Result<HashMap<String, Vec<Vec<u8>>>> {
+    pub fn fetch(&mut self) -> Result<HashMap<String, (Vec<Vec<u8>>, Datetime)>> {
+        let mut supmap = HashMap::new();
+        supmap.insert("vvolodin@opuscontract.ru", "opus");
+        supmap.insert("sales@bratec-lis.com", "fox");
+        supmap.insert("rassilka@fancyfloor.ru", "fancy");
+        // supmap.insert("sale8@fancy-floor.ru", "fancy");
+        supmap.insert("ulyana.boyko@carpetland.ru", "carpetland");
+        supmap.insert("dealer@kover-zefir.ru", "zefir");
+        supmap.insert("almaz2008@yandex.ru", "fenix");
         let mut session = self.session()?;
         let msg_count = session.search("ALL")?.len();
         let q = format!("{}:{msg_count}", self.from);
+        info!("Fetching from {q} to {msg_count}");
         let fetches = session.fetch(q, QUERY)?;
         self.from = msg_count;
         let mut m = HashMap::new();
@@ -67,7 +70,7 @@ impl MailClient {
                         .and_then(|a| a.first().and_then(|s| s.address()))
                         .map(|s| s.to_lowercase())
                         .unwrap_or_default();
-                    if SUPPLIERS.contains(&sender.as_str()) {
+                    if let Some(supplier) = supmap.get(sender.as_str()) {
                         let attachments = parsed
                             .attachments()
                             .flat_map(|a| {
@@ -84,7 +87,15 @@ impl MailClient {
                             })
                             .collect::<Vec<_>>();
                         if !attachments.is_empty() {
-                            m.insert(sender, attachments);
+                            let received = if let Some(r) = parsed
+                                .date()
+                                .and_then(|d| Datetime::from_str(&d.to_rfc3339()).ok())
+                            {
+                                r
+                            } else {
+                                Datetime(chrono::Utc::now())
+                            };
+                            m.insert(supplier.to_string(), (attachments, received));
                         }
                     }
                 }

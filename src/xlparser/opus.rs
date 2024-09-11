@@ -4,9 +4,10 @@ use std::io::Cursor;
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
+use surrealdb::sql::Datetime;
 use tracing::error;
 
-pub fn parser(files: Vec<Vec<u8>>) -> ParseResult {
+pub fn parser(files: Vec<Vec<u8>>, received: Datetime) -> ParseResult {
     let supplier = "opus".to_string();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -30,7 +31,11 @@ pub fn parser(files: Vec<Vec<u8>>) -> ParseResult {
         }
     });
     let items = rx.iter().collect();
-    ParseResult { supplier, items }
+    ParseResult {
+        supplier,
+        items,
+        date: received,
+    }
 }
 
 fn parse(table: Range<Data>, tx: Sender<StockItem>) {

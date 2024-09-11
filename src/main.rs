@@ -1,13 +1,13 @@
-mod telemetry;
 mod configuration;
 mod mail_client;
+mod storage;
+mod telemetry;
 mod web_parser;
 mod xlparser;
-mod storage;
 
 use anyhow::Result;
-use rayon::prelude::*;
-use tracing::info;
+use surrealdb::sql::Datetime;
+use tracing::{error, info};
 
 fn main() -> Result<()> {
     // logger
@@ -16,42 +16,67 @@ fn main() -> Result<()> {
     let cfg = configuration::get()?;
     info!("Config initialized successfully");
     // mail client
-    let mu = cfg.mail_user().to_string();
-    let mp = cfg.mail_pass().to_string();
-    let h = cfg.mail_host().to_string();
-    let mut mc = mail_client::new(&mu, &mp, &h)?;
+    let mut mc = mail_client::new(cfg.mail_user(), cfg.mail_pass(), cfg.mail_host())?;
     info!("Mail client initialized successfully");
-    let mut attachments_map = mc.fetch()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mtx = tx.clone();
+    std::thread::spawn(move || loop {
+        info!("Fetching mail attachments...");
+        if let Ok(mail_attachments) = mc.fetch() {
+            if !mail_attachments.is_empty() {
+                let pr = xlparser::parse(mail_attachments);
+                if mtx.send(pr).is_err() {
+                    error!("Error sending parsing result...");
+                }
+            }
+        }
+        info!("Emails fetched successfully. Paused for an hour");
+        std::thread::sleep(std::time::Duration::from_secs(60 * 60));
+    });
     // web parser
     let wp = web_parser::new(cfg.ort_user(), cfg.ort_pass())?;
-    let ort = wp.ortgraph()?;
-    attachments_map.insert(String::from("ortgraph"), ort);
-    let vvk = wp.vvk()?;
-    attachments_map.insert(String::from("vvk"), vvk);
-    for (s, a) in &attachments_map {
-        info!("Got {} attachments from '{s}'", a.len())
-    }
-    let opus_attachments = attachments_map.par_iter().find_first(|(s, _)| s.to_lowercase().contains("opus")).map(|(_, a)| a.to_vec()).unwrap_or_default();
-    let opus = xlparser::opus::parser(opus_attachments);
-    let fancy_attachments = attachments_map.par_iter().find_first(|(s, _)| s.to_lowercase().contains("fancy")).map(|(_, a)| a.to_vec()).unwrap_or_default();
-    let fancy = xlparser::fancy::parser(fancy_attachments);
-    // db client
+    std::thread::spawn(move || loop {
+        info!("Fetching web attachments...");
+        if let Ok(ort) = wp.ortgraph() {
+            let mut m = std::collections::HashMap::new();
+            m.insert("ortgraph".to_string(), (ort, Datetime(chrono::Utc::now())));
+            let pr = xlparser::parse(m);
+            if tx.send(pr).is_err() {
+                error!("Error sending parsing result...");
+            }
+        }
+        if let Ok(vvk) = wp.vvk() {
+            let mut m = std::collections::HashMap::new();
+            m.insert("vvk".to_string(), (vvk, Datetime(chrono::Utc::now())));
+            let pr = xlparser::parse(m);
+            if tx.send(pr).is_err() {
+                error!("Error sending parsing result...");
+            }
+        }
+        info!("Web attachments fetched successfully. Paused for a day");
+        std::thread::sleep(std::time::Duration::from_secs(60 * 60 * 24));
+    });
+    // db
     // TODO: add credentials
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        if let Ok(storage) = storage::new("root", "root", "test", "test").await {
-            info!("DB client initialized successfully");
-            match storage.update(opus).await {
-                Ok(_) => info!("Opus stock updated successfully"),
-                Err(e) => tracing::error!("Error while updating opus stock: {e:?}"),
+        match storage::new("root", "root", "test", "test").await {
+            Ok(db) => {
+                info!("DB client initialized successfully");
+                loop {
+                    if let Ok(pr) = rx.recv() {
+                        for r in pr {
+                            let supplier = r.supplier.clone();
+                            match db.update(r).await {
+                                Ok(_) => info!("Stock of {} updated successfully", supplier),
+                                Err(e) => error!("Error updating {} stock: {e:?}", supplier),
+                            }
+                        }
+                    }
+                }
             }
-            match storage.update(fancy).await {
-                Ok(_) => info!("Fancy stock updated successfully"),
-                Err(e) => tracing::error!("Error while updating fancy stock: {e:?}"),
-            }
+            Err(e) => error!("Error initializing DB client: {e:?}"),
         }
     });
-    // TODO: init app
-    // TODO: run app
     Ok(())
 }

@@ -8,15 +8,14 @@ use surrealdb::sql::Datetime;
 use tracing::error;
 
 pub fn parser(files: Vec<Vec<u8>>, received: Datetime) -> ParseResult {
-    let supplier = "fancy".to_string();
+    let supplier = "fox".to_string();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         for file in files {
             let cursor = Cursor::new(file);
             match open_workbook_auto_from_rs(cursor) {
                 Ok(mut wb) => {
-                    let sheets = wb.sheet_names();
-                    for sheet in sheets {
+                    if let Some(sheet) = wb.sheet_names().first() {
                         if let Ok(table) = wb.worksheet_range(&sheet) {
                             let tx = tx.clone();
                             thread::spawn(move || parse(table, tx));
@@ -39,22 +38,16 @@ pub fn parser(files: Vec<Vec<u8>>, received: Datetime) -> ParseResult {
 }
 
 fn parse(table: Range<Data>, tx: Sender<StockItem>) {
-    let re = regex::Regex::new(r#"^([A-z]+)\s.+$"#).unwrap();
     let mut name = String::new();
+    let re = regex::Regex::new(r#"^[А-я]+\s.+$"#).unwrap();
     for row in table.rows() {
-        let temp_name = row.first().and_then(|d| d.get_string()).unwrap_or_default();
+        let temp_name = row.get(2).and_then(|d| d.get_string()).unwrap_or_default();
         if re.is_match(temp_name) {
-            let second_name = row.get(4).and_then(|d| d.get_string()).unwrap_or_default();
-            name = format!("{temp_name} {second_name}");
-        } else if let Some(current) = row
-            .get(4)
+            name = temp_name.to_string();
+        } else if let Some(stock) = row
+            .get(6)
             .and_then(|d| d.to_string().trim().parse::<f64>().ok())
         {
-            let reserved = row
-                .get(6)
-                .and_then(|d| d.to_string().trim().parse::<f64>().ok())
-                .unwrap_or_default();
-            let stock = current - reserved;
             let item = StockItem {
                 name: name.clone(),
                 stock,
